@@ -1,4 +1,3 @@
-
 import os
 import torch
 import torch.nn as nn
@@ -23,83 +22,12 @@ torch.manual_seed(manualSeed)
 np.random.seed(manualSeed)
 random.seed(manualSeed)
 
-import umap
-import gudhi as gd
 import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-
-def compute_and_save_persistence_real_data(epoch, real_data, image_filenames):
-    """
-    Generates a point cloud from the real images, computes its persistence diagram,
-    and saves visualizations. Also saves a mapping between points and image filenames.
-    """
-    # Flatten images: [batch_size, channels, height, width] -> [batch_size, features]
-    flattened = real_data.view(real_data.size(0), -1).detach().cpu().numpy()
-
-    # Apply UMAP to directly reduce to 2D
-    umap_reducer = umap.UMAP(n_components=2)
-    point_cloud = umap_reducer.fit_transform(flattened)
-
-    # Save point cloud data with image filenames
-    mapping_df = pd.DataFrame({
-        'image_filename': image_filenames,
-        'umap1': point_cloud[:, 0],
-        'umap2': point_cloud[:, 1]
-    })
-    mapping_csv_path = f'point_clouds/real_point_cloud_epoch_{epoch:03d}.csv'
-    mapping_df.to_csv(mapping_csv_path, index=False)
-
-    # Plot and save point cloud
-    plt.figure(figsize=(6, 6))
-    plt.scatter(point_cloud[:, 0], point_cloud[:, 1], s=10, alpha=0.7, c='green')
-    plt.title(f'Real Data Point Cloud at Epoch {epoch}')
-    plt.xlabel('UMAP Component 1')
-    plt.ylabel('UMAP Component 2')
-    plt.grid(True)
-    plt.tight_layout()
-    point_cloud_plot_path = f'point_clouds/real_point_cloud_epoch_{epoch:03d}.png'
-    plt.savefig(point_cloud_plot_path)
-    plt.close()
-
-    # Compute persistence diagram using Vietoris-Rips complex
-    rips_complex = gd.RipsComplex(points=point_cloud, max_edge_length=10.0)
-    simplex_tree = rips_complex.create_simplex_tree(max_dimension=2)
-    persistence = simplex_tree.persistence()
-
-    # Save persistence as DataFrame
-    persistence_df = persistence_to_dataframe(persistence, image_filenames)
-
-    # Plot persistence diagram
-    try:
-        gd.plot_persistence_diagram(persistence)
-        plt.title(f'Real Data Persistence Diagram at Epoch {epoch}')
-        persistence_diagram_plot_path = f'persistence_diagrams/real_persistence_diagram_epoch_{epoch:03d}.png'
-        plt.savefig(persistence_diagram_plot_path)
-        plt.close()
-    except Exception as e:
-        print(f"Error plotting persistence diagram for real data at epoch {epoch}: {e}")
-
-    # Save persistence data as CSV
-    persistence_csv_path = f'persistence_diagrams/real_persistence_epoch_{epoch:03d}.csv'
-    persistence_df.to_csv(persistence_csv_path, index=False)
-
-def persistence_to_dataframe(persistence, image_filenames):
-    data = []
-    for i, feature in enumerate(persistence):
-        dim, (birth, death) = feature
-        if death == float('inf'):
-            death = None
-        data.append({'birth': birth, 'death': death, 'dimension': dim})
-    return pd.DataFrame(data)
-
-# Example usage in your training loop
-# Assuming `real_data` is a batch of real images from CIFAR-10
-# `image_filenames` is a list of filenames for the images in this batch
 
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f'Using device: {device}')
+
 
 def calculate_intrinsic_dimension(data):
     """
@@ -114,14 +42,15 @@ def calculate_intrinsic_dimension(data):
     # Convert the data to a GUDHI Data object and compute the 2NN intrinsic dimension
     id_estimator = Data(data)
     intrinsic_dimension, err, scale = id_estimator.compute_id_2NN()
-    
+
     return intrinsic_dimension
+
 
 # Hyperparameters
 num_epochs = 1000
 batch_size = 256
 lr_generator = 2e-4  # Increased learning rate for generator
-lr_discriminator = 1e-4 # Decreased learning rate for discriminator
+lr_discriminator = 1e-4  # Decreased learning rate for discriminator
 latent_size = 128  # Increased latent size
 image_size = 32
 image_channels = 3
@@ -151,12 +80,6 @@ print(f'Number of images in class {class_label}: {len(filtered_dataset)}')
 # Data loader
 dataloader = DataLoader(filtered_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
 
-epoch = 0  # Replace this with the current epoch number
-real_data = next(iter(dataloader))[0]  # Get a batch of real data from your dataloader
-image_filenames = [f'real_image_{i:03d}.png' for i in range(real_data.size(0))]  # Generate image filenames
-
-# Call the function to compute and save persistence diagram for real data
-compute_and_save_persistence_real_data(epoch, real_data, image_filenames)
 
 # Define weight initialization function
 def weights_init_normal(m):
@@ -168,6 +91,7 @@ def weights_init_normal(m):
     elif classname.find('BatchNorm') != -1:
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
+
 
 # Generator Model with Increased Parameters
 class Generator(nn.Module):
@@ -198,6 +122,7 @@ class Generator(nn.Module):
     def forward(self, input):
         return self.main(input)
 
+
 # Discriminator Model with Increased Parameters
 class Discriminator(nn.Module):
     def __init__(self, image_channels):
@@ -226,6 +151,7 @@ class Discriminator(nn.Module):
         output = self.main(input)
         return output.view(-1)
 
+
 # Initialize models
 generator = Generator(latent_size, image_channels).to(device)
 discriminator = Discriminator(image_channels).to(device)
@@ -249,24 +175,30 @@ G_losses = []
 D_losses = []
 real_intrinsic_dims = []
 generated_intrinsic_dims = []
+
+
 def compute_and_save_persistence(epoch, generated_images, image_filenames):
     # Flatten images: [batch_size, channels, height, width] -> [batch_size, features]
     flattened = generated_images.view(generated_images.size(0), -1).detach().cpu().numpy()
 
-    # Apply UMAP to directly reduce to 2D
-    umap_reducer = umap.UMAP(n_components=2)
+    # Apply UMAP to reduce to 3D
+    umap_reducer = umap.UMAP(n_components=3)
     point_cloud = umap_reducer.fit_transform(flattened)
+
+    # Ensure point_cloud and image_filenames are aligned
+    assert len(point_cloud) == len(image_filenames), "Point cloud and image filenames must be the same length."
 
     # Save point cloud data with image filenames
     mapping_df = pd.DataFrame({
         'image_filename': image_filenames,
         'umap1': point_cloud[:, 0],
-        'umap2': point_cloud[:, 1]
+        'umap2': point_cloud[:, 1],
+        'umap3': point_cloud[:, 2]
     })
     mapping_csv_path = f'point_clouds/point_cloud_epoch_{epoch:03d}.csv'
     mapping_df.to_csv(mapping_csv_path, index=False)
 
-    # Plot and save point cloud
+    # Plot and save 2D point cloud
     plt.figure(figsize=(6, 6))
     plt.scatter(point_cloud[:, 0], point_cloud[:, 1], s=10, alpha=0.7, c='blue')
     plt.title(f'Point Cloud at Epoch {epoch}')
@@ -278,13 +210,33 @@ def compute_and_save_persistence(epoch, generated_images, image_filenames):
     plt.savefig(point_cloud_plot_path)
     plt.close()
 
+    # Plot and save 3D point cloud
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Scatter plot using the 3 components
+    ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2], s=10, alpha=0.7, c='blue')
+
+    ax.set_title(f'3D Point Cloud at Epoch {epoch}')
+    ax.set_xlabel('UMAP Component 1')
+    ax.set_ylabel('UMAP Component 2')
+    ax.set_zlabel('UMAP Component 3')
+
+    plt.tight_layout()
+
+    # Save the plot
+    point_cloud_plot_path = f'point_clouds/point_cloud_3d_epoch_{epoch:03d}.png'
+    plt.savefig(point_cloud_plot_path)
+    plt.close()
+
     # Compute persistence diagram using Vietoris-Rips complex
     rips_complex = gd.RipsComplex(points=point_cloud, max_edge_length=10.0)
     simplex_tree = rips_complex.create_simplex_tree(max_dimension=2)
     persistence = simplex_tree.persistence()
+    persistence_pairs = simplex_tree.persistence_pairs()
 
     # Save persistence as DataFrame
-    persistence_df = persistence_to_dataframe(persistence, image_filenames)
+    persistence_df = persistence_to_dataframe(persistence, persistence_pairs, image_filenames)
 
     # Plot persistence diagram
     try:
@@ -300,21 +252,88 @@ def compute_and_save_persistence(epoch, generated_images, image_filenames):
     persistence_csv_path = f'persistence_diagrams/persistence_epoch_{epoch:03d}.csv'
     persistence_df.to_csv(persistence_csv_path, index=False)
 
-def persistence_to_dataframe(persistence, image_filenames):
+
+def compute_and_save_persistence_real_data(epoch, real_data, image_filenames):
+    """
+    Generates a point cloud from the real images, computes its persistence diagram,
+    and saves visualizations. Also saves a mapping between points and image filenames.
+    """
+    # Flatten images: [batch_size, channels, height, width] -> [batch_size, features]
+    flattened = real_data.view(real_data.size(0), -1).detach().cpu().numpy()
+
+    # Apply UMAP to reduce to 2D
+    umap_reducer = umap.UMAP(n_components=2)
+    point_cloud = umap_reducer.fit_transform(flattened)
+
+    # Ensure point_cloud and image_filenames are aligned
+    assert len(point_cloud) == len(image_filenames), "Point cloud and image filenames must be the same length."
+
+    # Save point cloud data with image filenames
+    mapping_df = pd.DataFrame({
+        'image_filename': image_filenames,
+        'umap1': point_cloud[:, 0],
+        'umap2': point_cloud[:, 1]
+    })
+    mapping_csv_path = f'point_clouds/real_point_cloud_epoch_{epoch:03d}.csv'
+    mapping_df.to_csv(mapping_csv_path, index=False)
+
+    # Plot and save point cloud
+    plt.figure(figsize=(6, 6))
+    plt.scatter(point_cloud[:, 0], point_cloud[:, 1], s=10, alpha=0.7, c='green')
+    plt.title(f'Real Data Point Cloud at Epoch {epoch}')
+    plt.xlabel('UMAP Component 1')
+    plt.ylabel('UMAP Component 2')
+    plt.grid(True)
+    plt.tight_layout()
+    point_cloud_plot_path = f'point_clouds/real_point_cloud_epoch_{epoch:03d}.png'
+    plt.savefig(point_cloud_plot_path)
+    plt.close()
+
+    # Compute persistence diagram using Vietoris-Rips complex
+    rips_complex = gd.RipsComplex(points=point_cloud, max_edge_length=10.0)
+    simplex_tree = rips_complex.create_simplex_tree(max_dimension=2)
+    persistence = simplex_tree.persistence()
+    persistence_pairs = simplex_tree.persistence_pairs()
+
+    # Save persistence as DataFrame
+    persistence_df = persistence_to_dataframe(persistence, persistence_pairs, image_filenames)
+
+    # Plot persistence diagram
+    try:
+        gd.plot_persistence_diagram(persistence)
+        plt.title(f'Real Data Persistence Diagram at Epoch {epoch}')
+        persistence_diagram_plot_path = f'persistence_diagrams/real_persistence_diagram_epoch_{epoch:03d}.png'
+        plt.savefig(persistence_diagram_plot_path)
+        plt.close()
+    except Exception as e:
+        print(f"Error plotting persistence diagram for real data at epoch {epoch}: {e}")
+
+    # Save persistence data as CSV
+    persistence_csv_path = f'persistence_diagrams/real_persistence_epoch_{epoch:03d}.csv'
+    persistence_df.to_csv(persistence_csv_path, index=False)
+
+
+def persistence_to_dataframe(persistence, persistence_pairs, image_filenames):
     data = []
-    for i, (dim, (birth, death)) in enumerate(persistence):
+    for ((dim, (birth, death)), (birth_simplex, death_simplex)) in zip(persistence, persistence_pairs):
         if death == float('inf'):
             death = None
-        # Add the image filename associated with this persistence feature
-        if i < len(image_filenames):
-            filename = image_filenames[i]
-        else:
-            filename = "Unknown"
+
+        # Collect vertices from birth and death simplices
+        vertices = set()
+        for simplex in [birth_simplex, death_simplex]:
+            if simplex is not None:
+                vertices.update(simplex)
+
+        # Map vertices to image filenames
+        filenames = [image_filenames[v] for v in vertices if v < len(image_filenames)]
+
         data.append({
             'birth': birth,
             'death': death,
             'dimension': dim,
-            'image_filename': filename
+            'vertices': list(vertices),
+            'image_filenames': filenames
         })
     return pd.DataFrame(data)
 
@@ -322,6 +341,7 @@ def persistence_to_dataframe(persistence, image_filenames):
 # Function to generate unique filenames for images
 def generate_image_filenames(epoch, batch_idx, num_images):
     return [f'epoch_{epoch:03d}_batch_{batch_idx:04d}_img_{i:03d}.png' for i in range(num_images)]
+
 
 # Function to plot and save loss graph
 def plot_and_save_loss_graph(G_losses, D_losses, filename='loss_graph.png'):
@@ -335,8 +355,17 @@ def plot_and_save_loss_graph(G_losses, D_losses, filename='loss_graph.png'):
     plt.grid(True)
     plt.savefig(filename)
     plt.close()
-real_data2 = next(iter(dataloader))[0]
+
+
 # Training Loop
+real_data2 = next(iter(dataloader))[0]  # For calculating intrinsic dimension of real data
+
+# Before starting training, compute and save persistence diagram for real data at epoch 0
+epoch = 0
+real_data_batch = next(iter(dataloader))[0].to(device)
+image_filenames_real = [f'real_image_{i:03d}.png' for i in range(real_data_batch.size(0))]
+compute_and_save_persistence_real_data(epoch, real_data_batch, image_filenames_real)
+
 for epoch in range(1, num_epochs + 1):
     image_dir = 'generated_images/individual'
 
@@ -347,7 +376,7 @@ for epoch in range(1, num_epochs + 1):
 
     for i, (data, _) in enumerate(dataloader, 0):
         b_size = data.size(0)
-        
+
         ############################
         # (1) Update Discriminator
         ###########################
@@ -356,7 +385,8 @@ for epoch in range(1, num_epochs + 1):
 
         # Labels with smoothing and randomness
         label_real = torch.full((b_size,), real_label_smoothing, dtype=torch.float, device=device)
-        label_fake = torch.rand(b_size, device=device) * fake_label_noise  # Random fake labels between 0 and noise level
+        label_fake = torch.rand(b_size,
+                                device=device) * fake_label_noise  # Random fake labels between 0 and noise level
 
         # Forward pass real data through Discriminator
         output_real = discriminator(real_data)
@@ -381,7 +411,8 @@ for epoch in range(1, num_epochs + 1):
         # (2) Update Generator
         ###########################
         generator.zero_grad()
-        label_gen = torch.full((b_size,), 1.0, dtype=torch.float, device=device)  # Generator tries to make discriminator believe outputs are real
+        label_gen = torch.full((b_size,), 1.0, dtype=torch.float,
+                               device=device)  # Generator tries to make discriminator believe outputs are real
 
         # Forward pass fake data through Discriminator
         output_gen = discriminator(fake_data)
@@ -413,21 +444,21 @@ for epoch in range(1, num_epochs + 1):
         # After all batches are processed, concatenate all_fake_images
         all_fake_images = torch.cat(all_fake_images)  # Concatenate all fake images
 
-        # Randomly select 128 images from all_fake_images
-        num_images_to_save = min(len(all_fake_images), 128)  # Ensure we don't exceed available images
-        selected_indices = random.sample(range(len(all_fake_images)), num_images_to_save)  # Randomly pick 128 indices
+        # Randomly select images from all_fake_images
+        num_images_to_save = min(len(all_fake_images), 512)  # Ensure we don't exceed available images
+        selected_indices = random.sample(range(len(all_fake_images)), num_images_to_save)  # Randomly pick indices
         selected_fake_images = all_fake_images[selected_indices]
 
-        # Generate unique filenames for the selected 128 images
+        # Generate unique filenames for the selected images
         image_filenames = generate_image_filenames(epoch, 0, num_images_to_save)
 
-        # Save the randomly selected 128 generated images for this epoch
+        # Save the randomly selected generated images for this epoch
         for j in range(num_images_to_save):
             save_image(selected_fake_images[j], os.path.join(image_dir, image_filenames[j]), normalize=True)
 
         # Compute persistence diagrams for the saved images
         compute_and_save_persistence(epoch, selected_fake_images, image_filenames)
-        
+
         # Calculate intrinsic dimension for real data (flattened)
         real_data_flat = real_data2.view(real_data2.size(0), -1).cpu().numpy()
         real_intrinsic_dim = calculate_intrinsic_dimension(real_data_flat)

@@ -5,6 +5,7 @@ from dash.dependencies import Input, Output
 import plotly.graph_objs as go
 import pandas as pd
 import base64
+import ast  # For safely evaluating strings to lists
 
 # Directories containing saved outputs
 image_dir = 'generated_images/individual'
@@ -17,7 +18,7 @@ loss_data = pd.read_csv('losses.csv')
 # Load intrinsic dimensions data (from CSV)
 intrinsic_dim_data = pd.read_csv('intrinsic_dimensions.csv')
 
-# Get list of epochs based on saved images (every 10 epochs)
+# Get list of epochs based on saved images (every 25 epochs)
 image_files = sorted(
     [f for f in os.listdir(image_dir) if f.endswith('.png') and 'epoch_' in f],
     key=lambda x: int(x.split('_')[1])
@@ -43,8 +44,8 @@ app.title = "DCGAN Training Progress with Interactive TDA"
 # App Layout
 app.layout = html.Div([
     html.H1("DCGAN Training Progress on CIFAR-10 Class 0 with Interactive TDA"),
-    
-    # Slider for selecting epoch (increments of 10)
+
+    # Slider for selecting epoch (increments of 25)
     dcc.Slider(
         id='epoch-slider',
         min=min_epoch,
@@ -53,42 +54,43 @@ app.layout = html.Div([
         value=min_epoch,
         marks={epoch: str(epoch) for epoch in epochs}
     ),
-    
+
     # Display current epoch
     html.Div(id='current-epoch', style={'textAlign': 'center', 'fontSize': 24, 'margin': '20px'}),
-    
+
     # Graphs for Point Cloud and Persistence Diagram
     html.Div([
         html.Div([
-            html.H3("Point Cloud"),
+            html.H3("3D Point Cloud"),
             dcc.Graph(id='point-cloud-graph', config={'displayModeBar': False}, style={'height': '400px'})
         ], style={'width': '48%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding': '10px'}),
-        
+
         html.Div([
             html.H3("Persistence Diagram"),
             dcc.Graph(id='persistence-diagram-graph', config={'displayModeBar': False}, style={'height': '400px'})
         ], style={'width': '48%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding': '10px'}),
     ], style={'display': 'flex', 'flexDirection': 'row', 'justifyContent': 'space-between'}),
-    
+
     # Display Corresponding Images
     html.Div([
         html.H3("Corresponding Images"),
         html.Div(id='corresponding-images', style={'display': 'flex', 'flexWrap': 'wrap', 'justifyContent': 'center'}),
     ], style={'textAlign': 'center', 'marginTop': '20px'}),
-    
+
     # Loss graph
     html.Div([
         html.H3("Training Losses"),
         dcc.Graph(id='loss-graph', config={'displayModeBar': False})
     ], style={'textAlign': 'center', 'marginTop': '20px'}),
-    
+
     # Intrinsic dimensions graph
     html.Div([
         html.H3("Intrinsic Dimensions"),
         dcc.Graph(id='intrinsic-dim-graph', config={'displayModeBar': False})
     ], style={'textAlign': 'center', 'marginTop': '20px'}),
-    
+
 ], style={'width': '90%', 'margin': 'auto', 'textAlign': 'center'})
+
 
 # Callback to update graphs based on slider and selections
 @app.callback(
@@ -114,53 +116,60 @@ def update_content(selected_epoch, selected_point_cloud_data, selected_persisten
     point_cloud_csv = epoch_to_point_cloud_csv.get(selected_epoch, '')
     if os.path.exists(point_cloud_csv):
         point_cloud_df = pd.read_csv(point_cloud_csv)
-        # Update to check for UMAP component columns instead of PCA
-        if not {'image_filename', 'umap1', 'umap2'}.issubset(point_cloud_df.columns):
+        # Check for UMAP component columns
+        if not {'image_filename', 'umap1', 'umap2', 'umap3'}.issubset(point_cloud_df.columns):
             print(f"Error: Missing expected columns in point cloud CSV for epoch {selected_epoch}.")
-            point_cloud_df = pd.DataFrame(columns=['image_filename', 'umap1', 'umap2'])
+            point_cloud_df = pd.DataFrame(columns=['image_filename', 'umap1', 'umap2', 'umap3'])
     else:
         print(f"Warning: Point cloud CSV not found for epoch {selected_epoch}.")
-        point_cloud_df = pd.DataFrame(columns=['image_filename', 'umap1', 'umap2'])
+        point_cloud_df = pd.DataFrame(columns=['image_filename', 'umap1', 'umap2', 'umap3'])
 
-    # Create point cloud plot
+    # Create point cloud plot (3D version)
     point_cloud_fig = go.Figure()
     if not point_cloud_df.empty:
-        point_cloud_fig.add_trace(go.Scatter(
+        point_cloud_fig.add_trace(go.Scatter3d(
             x=point_cloud_df['umap1'],
             y=point_cloud_df['umap2'],
+            z=point_cloud_df['umap3'],
             mode='markers',
-            marker=dict(size=8, color='blue', opacity=0.6),
+            marker=dict(size=5, color='blue', opacity=0.6),
             customdata=point_cloud_df['image_filename'],
             name='Generated Points',
             hoverinfo='text',
             hovertext=point_cloud_df['image_filename']
         ))
     else:
-        point_cloud_fig.add_trace(go.Scatter(
-            x=[],
-            y=[],
+        point_cloud_fig.add_trace(go.Scatter3d(
+            x=[], y=[], z=[],
             mode='markers',
             marker=dict(size=8, color='blue', opacity=0.6),
             name='No Data',
             text=['No data available'],
             hoverinfo='text'
         ))
+
     point_cloud_fig.update_layout(
-        title='Point Cloud',
-        clickmode='event+select',
-        xaxis_title='UMAP Component 1',  # Update label to reflect UMAP
-        yaxis_title='UMAP Component 2',  # Update label to reflect UMAP
-        hovermode='closest'
+        title='3D Point Cloud',
+        scene=dict(
+            xaxis_title='UMAP Component 1',
+            yaxis_title='UMAP Component 2',
+            zaxis_title='UMAP Component 3'
+        ),
+        hovermode='closest',
+        clickmode='event+select'
     )
 
     # Load persistence diagram data
     persistence_csv = epoch_to_persistence_csv.get(selected_epoch, '')
     if os.path.exists(persistence_csv):
         persistence_df = pd.read_csv(persistence_csv)
-        if not {'birth', 'death', 'dimension', 'image_filename'}.issubset(persistence_df.columns):
+        if not {'birth', 'death', 'dimension', 'image_filenames'}.issubset(persistence_df.columns):
             print(f"Error: Missing expected columns in persistence diagram CSV for epoch {selected_epoch}.")
-            persistence_df = pd.DataFrame(columns=['birth', 'death', 'dimension', 'image_filename'])
-        
+            persistence_df = pd.DataFrame(columns=['birth', 'death', 'dimension', 'image_filenames'])
+        else:
+            # Convert 'image_filenames' from string to list
+            persistence_df['image_filenames'] = persistence_df['image_filenames'].apply(ast.literal_eval)
+
         # Filter out infinite deaths if necessary
         persistence_df = persistence_df[persistence_df['death'].notnull()]
 
@@ -169,17 +178,22 @@ def update_content(selected_epoch, selected_point_cloud_data, selected_persisten
 
         for dim in persistence_df['dimension'].unique():
             df_dim = persistence_df[persistence_df['dimension'] == dim]
+
+            # Ensure 'image_filenames' is a list
+            df_dim['image_filenames'] = df_dim['image_filenames'].apply(lambda x: x if isinstance(x, list) else [])
+            image_counts = df_dim['image_filenames'].apply(len)
+
             persistence_fig.add_trace(go.Scatter(
                 x=df_dim['birth'],
                 y=df_dim['death'],
                 mode='markers',
                 marker=dict(size=8, opacity=0.6),
                 name=f'Dimension {dim}',
-                customdata=df_dim['image_filename'],
+                customdata=df_dim['image_filenames'].tolist(),  # List of lists
                 hoverinfo='text',
                 hovertext=[
-                    f'Dimension: {dim}<br>Birth: {b:.2f}<br>Death: {d:.2f}'
-                    for b, d in zip(df_dim['birth'], df_dim['death'])
+                    f'Dimension: {dim}<br>Birth: {b:.2f}<br>Death: {d:.2f}<br>Num Images: {n}'
+                    for b, d, n in zip(df_dim['birth'], df_dim['death'], image_counts)
                 ]
             ))
 
@@ -190,7 +204,7 @@ def update_content(selected_epoch, selected_point_cloud_data, selected_persisten
             x0=0, y0=0, x1=max_val, y1=max_val,
             line=dict(dash='dash', color='grey')
         )
-        
+
         persistence_fig.update_layout(
             title='Persistence Diagram',
             clickmode='event+select',
@@ -211,7 +225,10 @@ def update_content(selected_epoch, selected_point_cloud_data, selected_persisten
         selected_filenames += [point['customdata'] for point in selected_point_cloud_data['points']]
 
     if selected_persistence_data:
-        selected_filenames += [point['customdata'] for point in selected_persistence_data['points']]
+        for point in selected_persistence_data['points']:
+            # point['customdata'] is a list of image filenames
+            filenames = point['customdata']
+            selected_filenames += filenames
 
     selected_filenames = list(set(selected_filenames))  # Remove duplicates
 
@@ -274,6 +291,7 @@ def update_content(selected_epoch, selected_point_cloud_data, selected_persisten
     )
 
     return point_cloud_fig, persistence_fig, images, epoch_text, loss_fig, intrinsic_dim_fig
+
 
 # Run the app
 if __name__ == '__main__':
